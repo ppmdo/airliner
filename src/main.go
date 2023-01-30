@@ -270,4 +270,12 @@ func main() {
     }
     imgMsg := tgbotapi.NewPhoto(chatID, file)
     bot.Send(imgMsg)
+
+    for _, v := range offers {
+        err = os.Remove(v.screenshot)
+        
+        if err != nil {
+            log.Panic(err)
+        }
+    }
 }
