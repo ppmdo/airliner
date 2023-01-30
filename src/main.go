@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
-	"log"
+    "log"
 	"os"
 	"strconv"
 	"strings"
@@ -13,17 +13,14 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 type Offer struct {
 	price         float64
 	departureDate time.Time
 	returnDate    time.Time
-}
-
-type OfferResult struct {
-	priceText      string
-	pageScreenshot []byte
+    screenshot string
 }
 
 func (o *Offer) String() string {
@@ -33,6 +30,7 @@ func (o *Offer) String() string {
 type Payload struct {
 	departureDate time.Time
 	returnDate    time.Time
+    id int
 }
 
 func (p *Payload) String() string {
@@ -45,34 +43,36 @@ func (p *Payload) String() string {
 const day = 24 * time.Hour
 
 func createPayloads(initialDate time.Time, tripLength int, daysToLookup int, ch chan *Payload, wg *sync.WaitGroup) {
-    defer close(ch)
-    defer wg.Done()
+	defer close(ch)
+	defer wg.Done()
 
 	i := 0
 	for i < daysToLookup {
-        initialDate2 := initialDate.Add(time.Duration(i) * day)
+		initialDate2 := initialDate.Add(time.Duration(i) * day)
 		ch <- &Payload{
-            initialDate2,
+			initialDate2,
 			initialDate2.Add(time.Duration(tripLength) * day),
+            i,
 		}
-        i++
+		i++
 	}
 }
 
-func takeAndSaveScreenshot(ctx *context.Context) {
+func takeAndSaveScreenshot(ctx *context.Context, fname string) string {
 	var buff []byte
 
+    fname = fmt.Sprintf("%s.png", fname)
+
 	if err := chromedp.Run(*ctx,
-		//chromedp.WaitVisible(adviceSelector, chromedp.ByQuery),
 		chromedp.CaptureScreenshot(&buff),
 	); err != nil {
 		log.Fatal(err)
 	}
-	if err := os.WriteFile("fullScreenshot.png", buff, 0o644); err != nil {
+	if err := os.WriteFile(fname, buff, 0o644); err != nil {
 		log.Fatal(err)
 	}
 
-	log.Printf("wrote elementScreenshot.png and fullScreenshot.png")
+    return fname
 }
 
 func getAdviceText(ctx *context.Context) *string {
@@ -120,7 +120,6 @@ func findBestOfferPrice(ctx *context.Context) *string {
 		log.Fatal(err)
 	}
 
-    fmt.Println("Best offer extracted")
 	return &result
 }
 
@@ -134,15 +133,15 @@ func getInitialDate() time.Time {
 }
 
 func asyncGetOfferForPayloads(inChan chan *Payload, outChan chan *Offer, sem chan int) {
-    defer close(outChan)
-    var wg sync.WaitGroup
+	defer close(outChan)
+	var wg sync.WaitGroup
 
-    inner := func(v *Payload) {
+	inner := func(v *Payload) {
 		defer wg.Done()
 
-        sem <- 1
+		sem <- 1
 		outChan <- getOfferForPayload(v)
-        <- sem
+		<-sem
 	}
 
 	for v := range inChan {
@@ -152,15 +151,15 @@ func asyncGetOfferForPayloads(inChan chan *Payload, outChan chan *Offer, sem cha
 		}
 	}
 
-    wg.Wait()
+	wg.Wait()
 }
 func getOfferForPayload(payload *Payload) *Offer {
 	fmt.Println(fmt.Sprintf("Getting %s", payload.String()))
 
-    opts := append(
-        chromedp.DefaultExecAllocatorOptions[:],
-        chromedp.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 11_2_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36"),
-        )
+	opts := append(
+		chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 11_2_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36"),
+	)
 
 	alloCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
@@ -172,26 +171,24 @@ func getOfferForPayload(payload *Payload) *Offer {
 	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-    url := "https://www.kayak.com/flights/MUC-LIS/" + payload.String() + "?sort=bestflight_a&fs=stops=~0"
+	url := "https://www.kayak.com/flights/MUC-LIS/" + payload.String() + "?sort=bestflight_a&fs=stops=~0"
 
-    // set the viewport size, to know what screenshot size to expect
+	// set the viewport size, to know what screenshot size to expect
 	width, height := 1024, 768
 
 	if err := chromedp.Run(ctx,
-        chromedp.Navigate(url),
+		chromedp.Navigate(url),
 		emulation.SetDeviceMetricsOverride(int64(width), int64(height), 1.0, false),
 	); err != nil {
 		log.Fatal(err)
 	}
-
-    takeAndSaveScreenshot(&ctx)
 
 	for {
 		if isReady(&ctx) {
 			break
 		}
 	}
-    takeAndSaveScreenshot(&ctx)
+    screenshot := takeAndSaveScreenshot(&ctx, fmt.Sprintf("%d", payload.id))
 
 	bestPrice := findBestOfferPrice(&ctx)
 
@@ -204,29 +201,73 @@ func getOfferForPayload(payload *Payload) *Offer {
 		v,
 		payload.departureDate,
 		payload.returnDate,
+        screenshot,
 	}
+}
+
+func getMinPriceOffer(offers []*Offer) *Offer {
+    var min *Offer
+
+    for _, o := range offers {
+
+        if min == nil || o.price < min.price {
+            min = o
+        }
+    }
+
+    return min
 }
 
 func main() {
 	outChan := make(chan *Offer)
-    inChan := make(chan *Payload)
-    sem := make(chan int, 1)
+	inChan := make(chan *Payload)
+    offers := make([]*Offer, 0, 0)
+	sem := make(chan int, 2)
 
-    var wg sync.WaitGroup
+    bot, err := tgbotapi.NewBotAPI("***REMOVED***")
+	if err != nil {
+		log.Panic(err)
+	}
+	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-    initialDate := getInitialDate()
+    msg := tgbotapi.NewMessage(***REMOVED***, "Hi there... Query operation starting...")
+	bot.Send(msg)
+	var wg sync.WaitGroup
 
-    wg.Add(2)
-    go createPayloads(
-		initialDate, 10, 2, inChan, &wg,
+	initialDate := getInitialDate()
+
+	wg.Add(2)
+	go createPayloads(
+		initialDate, 10, 5, inChan, &wg,
 	)
 
-    go func() {
-        defer wg.Done()
-        for v := range outChan {
-		fmt.Println(v.String())
-	}}()
+	go func() {
+		defer wg.Done()
+
+		for v := range outChan {
+            fmt.Println(v.String())
+            offers = append(offers, v)
+		}
+	}()
 
 	asyncGetOfferForPayloads(inChan, outChan, sem)
-    wg.Wait()
+	wg.Wait()
+
+    minOffer := getMinPriceOffer(offers)
+    chatID := int64(***REMOVED***)
+    msgText := fmt.Sprintf("The best offer to travel for 7 days to Lisbon is: Price %.2f, Departure: %s, Return: %s", minOffer.price, minOffer.departureDate, minOffer.returnDate)
+    msg = tgbotapi.NewMessage(chatID, msgText)
+	bot.Send(msg)
+
+    reader, err := os.Open(minOffer.screenshot)
+    if err != nil {
+        log.Panic(err)
+    }
+
+    file := tgbotapi.FileReader{
+        Name: minOffer.screenshot,
+        Reader: reader,
+    }
+    imgMsg := tgbotapi.NewPhoto(chatID, file)
+    bot.Send(imgMsg)
 }
