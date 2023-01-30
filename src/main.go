@@ -5,54 +5,33 @@ import (
 	"fmt"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
-    "log"
+	"log"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+    calc "airliner/calculation"
+	tg "airliner/telegram"
+    md "airliner/model"
 	"github.com/chromedp/chromedp"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-type Offer struct {
-	price         float64
-	departureDate time.Time
-	returnDate    time.Time
-    screenshot string
-}
-
-func (o *Offer) String() string {
-	return fmt.Sprintf("Price: %.2f - From %s to %s", o.price, o.departureDate.Format("2006-01-02"), o.returnDate.Format("2006-01-02"))
-}
-
-type Payload struct {
-	departureDate time.Time
-	returnDate    time.Time
-    id int
-}
-
-func (p *Payload) String() string {
-	a := p.departureDate.Format("2006-01-02")
-	b := p.returnDate.Format("2006-01-02")
-
-	return fmt.Sprintf("%s/%s", a, b)
-}
 
 const day = 24 * time.Hour
 
-func createPayloads(initialDate time.Time, tripLength int, daysToLookup int, ch chan *Payload, wg *sync.WaitGroup) {
+func createPayloads(initialDate time.Time, tripLength int, daysToLookup int, ch chan *md.Payload, wg *sync.WaitGroup) {
 	defer close(ch)
 	defer wg.Done()
 
 	i := 0
 	for i < daysToLookup {
 		initialDate2 := initialDate.Add(time.Duration(i) * day)
-		ch <- &Payload{
+		ch <- &md.Payload{
 			initialDate2,
 			initialDate2.Add(time.Duration(tripLength) * day),
-            i,
+			i,
 		}
 		i++
 	}
@@ -61,7 +40,7 @@ func createPayloads(initialDate time.Time, tripLength int, daysToLookup int, ch 
 func takeAndSaveScreenshot(ctx *context.Context, fname string) string {
 	var buff []byte
 
-    fname = fmt.Sprintf("%s.png", fname)
+	fname = fmt.Sprintf("%s.png", fname)
 
 	if err := chromedp.Run(*ctx,
 		chromedp.CaptureScreenshot(&buff),
@@ -72,7 +51,7 @@ func takeAndSaveScreenshot(ctx *context.Context, fname string) string {
 		log.Fatal(err)
 	}
 
-    return fname
+	return fname
 }
 
 func getAdviceText(ctx *context.Context) *string {
@@ -108,11 +87,22 @@ func findBestOfferPrice(ctx *context.Context) *string {
 
 	selector := "//div[@data-resultid and contains(., 'Best')]"
 
-	if err := chromedp.Run(*ctx,
-		chromedp.Nodes(selector, &nodes),
-	); err != nil {
-		log.Fatal(err)
-	}
+    repeat := 3
+    for {
+        if err := chromedp.Run(*ctx,
+            chromedp.Nodes(selector, &nodes),
+            ); err != nil {
+            log.Fatal(err)
+        }
+        if len(nodes) > 0 {
+            break
+
+        } else {
+            fmt.Println("Couldn't find best offer, retrying...")
+            time.Sleep(time.Second)
+            repeat --
+        }
+    }
 
 	if err := chromedp.Run(*ctx,
 		chromedp.Text("[class$=price-text]", &result, chromedp.FromNode(nodes[0])),
@@ -123,20 +113,15 @@ func findBestOfferPrice(ctx *context.Context) *string {
 	return &result
 }
 
-func getInitialDate() time.Time {
-	timeString := "2023-03-01"
-	d, err := time.Parse("2006-01-02", timeString)
-	if err != nil {
-		fmt.Println("Could not parse time:", err)
-	}
-	return d
+func calculateInitialDate(referenceDate time.Time) time.Time {
+	return referenceDate.Add(time.Duration(28) * day)
 }
 
-func asyncGetOfferForPayloads(inChan chan *Payload, outChan chan *Offer, sem chan int) {
+func asyncGetOfferForPayloads(inChan chan *md.Payload, outChan chan *md.Offer, sem chan int) {
 	defer close(outChan)
 	var wg sync.WaitGroup
 
-	inner := func(v *Payload) {
+	inner := func(v *md.Payload) {
 		defer wg.Done()
 
 		sem <- 1
@@ -153,7 +138,7 @@ func asyncGetOfferForPayloads(inChan chan *Payload, outChan chan *Offer, sem cha
 
 	wg.Wait()
 }
-func getOfferForPayload(payload *Payload) *Offer {
+func getOfferForPayload(payload *md.Payload) *md.Offer {
 	fmt.Println(fmt.Sprintf("Getting %s", payload.String()))
 
 	opts := append(
@@ -168,7 +153,7 @@ func getOfferForPayload(payload *Payload) *Offer {
 	defer cancel()
 
 	// create a timeout
-	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
+	ctx, cancel = context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
 	url := "https://www.kayak.com/flights/MUC-LIS/" + payload.String() + "?sort=bestflight_a&fs=stops=~0"
@@ -188,7 +173,7 @@ func getOfferForPayload(payload *Payload) *Offer {
 			break
 		}
 	}
-    screenshot := takeAndSaveScreenshot(&ctx, fmt.Sprintf("%d", payload.id))
+	screenshot := takeAndSaveScreenshot(&ctx, fmt.Sprintf("%d", payload.Id))
 
 	bestPrice := findBestOfferPrice(&ctx)
 
@@ -197,85 +182,87 @@ func getOfferForPayload(payload *Payload) *Offer {
 		fmt.Println("Fatal: Failed to parse float value for price")
 	}
 
-	return &Offer{
+	return &md.Offer{
 		v,
-		payload.departureDate,
-		payload.returnDate,
-        screenshot,
+		payload.DepartureDate,
+		payload.ReturnDate,
+		screenshot,
 	}
 }
 
-func getMinPriceOffer(offers []*Offer) *Offer {
-    var min *Offer
-
-    for _, o := range offers {
-
-        if min == nil || o.price < min.price {
-            min = o
-        }
-    }
-
-    return min
-}
 
 func main() {
-	outChan := make(chan *Offer)
-	inChan := make(chan *Payload)
-    offers := make([]*Offer, 0, 0)
-	sem := make(chan int, 2)
+	var wg sync.WaitGroup
 
-    bot, err := tgbotapi.NewBotAPI("***REMOVED***")
+	outChan := make(chan *md.Offer)
+	inChan := make(chan *md.Payload)
+	offers := make([]*md.Offer, 0, 0)
+	sem := make(chan int, 3)
+
+	initialDate := calculateInitialDate(time.Now())
+	tripDuration := 10
+	datesToLookAhead := 10
+
+	bot, err := tg.InitBot()
 	if err != nil {
 		log.Panic(err)
 	}
-	log.Printf("Authorized on account %s", bot.Self.UserName)
-
-    msg := tgbotapi.NewMessage(***REMOVED***, "Hi there... Query operation starting...")
-	bot.Send(msg)
-	var wg sync.WaitGroup
-
-	initialDate := getInitialDate()
+	notifyStart(bot)
 
 	wg.Add(2)
 	go createPayloads(
-		initialDate, 10, 5, inChan, &wg,
+		initialDate, tripDuration, datesToLookAhead, inChan, &wg,
 	)
 
-	go func() {
-		defer wg.Done()
-
-		for v := range outChan {
-            fmt.Println(v.String())
-            offers = append(offers, v)
-		}
-	}()
+    go readOffers(
+        outChan, &offers, &wg,
+    )
 
 	asyncGetOfferForPayloads(inChan, outChan, sem)
 	wg.Wait()
 
-    minOffer := getMinPriceOffer(offers)
-    chatID := int64(***REMOVED***)
-    msgText := fmt.Sprintf("The best offer to travel for 7 days to Lisbon is: Price %.2f, Departure: %s, Return: %s", minOffer.price, minOffer.departureDate, minOffer.returnDate)
-    msg = tgbotapi.NewMessage(chatID, msgText)
-	bot.Send(msg)
+	minOffer := calc.GetMinPriceOffer(offers)
 
-    reader, err := os.Open(minOffer.screenshot)
-    if err != nil {
-        log.Panic(err)
-    }
+	notifyEnd(bot, &tripDuration, minOffer)
+	cleanupFiles(offers)
+}
 
-    file := tgbotapi.FileReader{
-        Name: minOffer.screenshot,
-        Reader: reader,
-    }
-    imgMsg := tgbotapi.NewPhoto(chatID, file)
-    bot.Send(imgMsg)
+func notifyStart(bot *tg.Bot) {
+	tg.SendMessage(bot, "Hi there... Query operation starting...")
+}
 
-    for _, v := range offers {
-        err = os.Remove(v.screenshot)
-        
-        if err != nil {
-            log.Panic(err)
-        }
-    }
+func notifyEnd(bot *tg.Bot, tripDuration *int, offer *md.Offer) {
+	msgText := fmt.Sprintf(
+        "The best offer to travel for %d days to Lisbon is: Price %.2f, Departure: %s, Return: %s",
+        *tripDuration,
+        offer.Price,
+        offer.DepartureDate.Format("2006-01-02"),
+        offer.ReturnDate.Format("2006-01-02"),
+    )
+	tg.SendMessage(bot, msgText)
+
+	reader, err := os.Open(offer.Screenshot)
+	if err != nil {
+		log.Panic(err)
+	}
+	tg.SendImage(bot, offer.Screenshot, reader)
+}
+
+func cleanupFiles(offers []*md.Offer) {
+	for _, v := range offers {
+		err := os.Remove(v.Screenshot)
+
+		if err != nil {
+			log.Panic(err)
+		}
+	}
+}
+
+func readOffers(ch chan *md.Offer, offers *[]*md.Offer, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for v := range ch {
+		fmt.Println(v.String())
+		*offers = append(*offers, v)
+	}
 }
