@@ -5,6 +5,8 @@ import (
     "time"
 )
 
+const Day = 24 * time.Hour
+
 type Offer struct {
 	Price         float64
 	DepartureDate time.Time
@@ -22,7 +24,7 @@ type Payload struct {
 	Id            int
 }
 
-func (p *Payload) String() string {
+func (p *Payload) DateString() string {
 	a := p.DepartureDate.Format("2006-01-02")
 	b := p.ReturnDate.Format("2006-01-02")
 
