@@ -8,6 +8,8 @@ import (
 )
 
 func CreatePayloads(
+    fromCity string,
+    toCity string,
     initialDate time.Time,
     tripLength int,
     daysToLookup int,
@@ -21,6 +23,8 @@ func CreatePayloads(
 	for i < daysToLookup {
 		initialDate2 := initialDate.Add(time.Duration(i) * md.Day)
 		ch <- &md.Payload{
+            FromCity: fromCity,
+            ToCity: toCity,
 			DepartureDate: initialDate2,
 			ReturnDate: initialDate2.Add(time.Duration(tripLength) * md.Day),
 			Id: i,

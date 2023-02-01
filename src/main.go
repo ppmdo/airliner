@@ -22,6 +22,9 @@ func main() {
 	offers := make([]*md.Offer, 0, 0)
 	sem := make(chan int, 3)
 
+    fromCity := "MUC"
+    toCity := "LIS"
+
     tm, _ := time.Parse("2006-01-02", "2023-03-28")
 	initialDate := ky.CalculateInitialDate(tm)
 	tripDuration := 10
@@ -35,7 +38,7 @@ func main() {
 
 	wg.Add(2)
 	go ky.CreatePayloads(
-		initialDate, tripDuration, datesToLookAhead, inChan, &wg,
+		fromCity, toCity, initialDate, tripDuration, datesToLookAhead, inChan, &wg,
 	)
 
     go readOffers(
@@ -47,7 +50,7 @@ func main() {
 
 	minOffer := calc.GetMinPriceOffer(offers)
 
-	notifyEnd(bot, &tripDuration, minOffer)
+	notifyEnd(bot, fromCity, toCity, &tripDuration, minOffer)
 	cleanupFiles(offers)
 }
 
@@ -55,10 +58,12 @@ func notifyStart(bot *tg.Bot) {
 	tg.SendMessage(bot, "Hi there... Query operation starting...")
 }
 
-func notifyEnd(bot *tg.Bot, tripDuration *int, offer *md.Offer) {
+func notifyEnd(bot *tg.Bot, fromCity string, toCity string, tripDuration *int, offer *md.Offer) {
 	msgText := fmt.Sprintf(
-        "The best offer to travel for %d days to Lisbon is: Price %.2f, Departure: %s, Return: %s",
+        "The best offer to travel for %d days from %s to %s is: Price %.2f, Departure: %s, Return: %s",
         *tripDuration,
+        fromCity,
+        toCity,
         offer.Price,
         offer.DepartureDate.Format("2006-01-02"),
         offer.ReturnDate.Format("2006-01-02"),
