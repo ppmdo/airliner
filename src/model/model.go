@@ -19,6 +19,8 @@ func (o *Offer) String() string {
 }
 
 type Payload struct {
+    FromCity string
+    ToCity string
 	DepartureDate time.Time
 	ReturnDate    time.Time
 	Id            int

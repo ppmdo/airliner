@@ -18,7 +18,7 @@ func TestCreatePayloads(t *testing.T) {
     ch := make(chan *md.Payload)
 
     wg.Add(1)
-    go CreatePayloads(initialDate, tripLength, daysToLookAhead, ch, &wg)
+    go CreatePayloads("LIS", "MUC", initialDate, tripLength, daysToLookAhead, ch, &wg)
 
     i := 0
     for v := range ch {
@@ -28,12 +28,12 @@ func TestCreatePayloads(t *testing.T) {
 
     wg.Wait()
 
-    expected := []struct {departure time.Time; returndate time.Time; id int} {
-        {createDate("2023-01-01"), createDate("2023-01-11"), 0},
-        {createDate("2023-01-02"), createDate("2023-01-12"), 1},
-        {createDate("2023-01-03"), createDate("2023-01-13"), 2},
-        {createDate("2023-01-04"), createDate("2023-01-14"), 3},
-        {createDate("2023-01-05"), createDate("2023-01-15"), 4},
+    expected := []struct {from string; to string; departure time.Time; returndate time.Time; id int} {
+        {"LIS", "MUC", createDate("2023-01-01"), createDate("2023-01-11"), 0},
+        {"LIS", "MUC", createDate("2023-01-02"), createDate("2023-01-12"), 1},
+        {"LIS", "MUC", createDate("2023-01-03"), createDate("2023-01-13"), 2},
+        {"LIS", "MUC", createDate("2023-01-04"), createDate("2023-01-14"), 3},
+        {"LIS", "MUC", createDate("2023-01-05"), createDate("2023-01-15"), 4},
     }
 
     for i, e := range expected {
