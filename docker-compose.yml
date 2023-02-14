@@ -10,7 +10,9 @@ services:
             DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN}
         ports:
             - "8086:8086"
-
+        volumes:
+            - $HOME/docker/influxdb/data:/var/lib/influxdb
+            
     airliner:
         image: airliner:latest
         environment:
