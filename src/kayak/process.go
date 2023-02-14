@@ -70,7 +70,7 @@ func isReady(ctx *context.Context) (bool, error) {
 
 	adviceText, err := getAdviceText(ctx)
 	for {
-		if !strings.Contains(*adviceText, "load") {
+		if adviceText != nil && !strings.Contains(*adviceText, "load"){
 			break
 		} else {
 			time.Sleep(2 * time.Second)
