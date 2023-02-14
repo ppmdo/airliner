@@ -1,6 +1,7 @@
 package main
 
 import (
+    "flag"
 	"fmt"
 	"log"
 	"os"
@@ -17,18 +18,41 @@ import (
 func main() {
 	var wg sync.WaitGroup
 
+    var fromcity = flag.String("from", "", "3 letter upercase code for the city flying from.")
+    var tocity = flag.String("to", "", "3 letter upercase code for the city flying to.")
+    var lookahead = flag.Int("look-ahead", -1, "numbe of days to look ahead")
+    var duration = flag.Int("duration", -1, "journey duration")
+
+    flag.Parse()
+
+    if *fromcity == "" {
+        fmt.Println("ERROR argument --from not supplied")
+        return
+    }
+    if *tocity == "" {
+        fmt.Println("ERROR argument --to not supplied")
+        return
+    }
+    if *lookahead == -1 {
+        fmt.Println("ERROR argument --look-ahead not supplied")
+        return
+    }
+    if *duration == -1 {
+        fmt.Println("ERROR argument --duration not supplied")
+        return
+    }
+
 	outChan := make(chan *md.Offer)
 	inChan := make(chan *md.Payload)
 	offers := make([]*md.Offer, 0, 0)
 	sem := make(chan int, 3)
 
-    fromCity := "MUC"
-    toCity := "LIS"
+    fromCity := *fromcity
+    toCity := *tocity
 
-    tm, _ := time.Parse("2006-01-02", "2023-03-28")
-	initialDate := ky.CalculateInitialDate(tm)
-	tripDuration := 10
-	datesToLookAhead := 10
+	initialDate := ky.CalculateInitialDate(time.Now())
+	tripDuration := *duration
+	datesToLookAhead := *lookahead
 
 	bot, err := tg.InitBot()
 	if err != nil {

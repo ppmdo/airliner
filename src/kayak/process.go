@@ -178,7 +178,7 @@ func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 	ctx, cancel = context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	url := "https://www.kayak.com/flights/LIS-MUC/" + payload.DateString() + "?sort=bestflight_a&fs=stops=~0"
+	url := "https://www.kayak.com/flights/"+ payload.FromCity + "-" + payload.ToCity + "/" + payload.DateString() + "?sort=bestflight_a&fs=stops=~0"
 
 	// set the viewport size, to know what screenshot size to expect
 	width, height := 1024, 768
