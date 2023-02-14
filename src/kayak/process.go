@@ -198,6 +198,7 @@ func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
             return nil, err
         }
 	}
+
 	screenshot := takeAndSaveScreenshot(&ctx, fmt.Sprintf("%d", payload.Id))
 
 	bestPrice := findBestOfferPrice(&ctx)
@@ -208,9 +209,13 @@ func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 	}
 
 	return &md.Offer{
-		v,
+        url,
+        payload.FromCity,
+        payload.ToCity,
 		payload.DepartureDate,
 		payload.ReturnDate,
+        v,
 		screenshot,
+        time.Now(),
 	}, nil
 }
