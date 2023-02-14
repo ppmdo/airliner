@@ -1,54 +1,56 @@
 package main
 
 import (
-    "flag"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"sync"
 	"time"
 
-    calc "airliner/calculation"
+	calc "airliner/calculation"
+	db "airliner/database"
+	ky "airliner/kayak"
+	md "airliner/model"
 	tg "airliner/telegram"
-    md "airliner/model"
-    ky "airliner/kayak"
 )
-
 
 func main() {
 	var wg sync.WaitGroup
 
-    var fromcity = flag.String("from", "", "3 letter upercase code for the city flying from.")
-    var tocity = flag.String("to", "", "3 letter upercase code for the city flying to.")
-    var lookahead = flag.Int("look-ahead", -1, "numbe of days to look ahead")
-    var duration = flag.Int("duration", -1, "journey duration")
+	var fromcity = flag.String("from", "", "3 letter upercase code for the city flying from.")
+	var tocity = flag.String("to", "", "3 letter upercase code for the city flying to.")
+	var lookahead = flag.Int("look-ahead", -1, "number of days to look ahead")
+	var duration = flag.Int("duration", -1, "journey duration")
 
-    flag.Parse()
+    var client = db.InitDB("test_influxdb.env")
 
-    if *fromcity == "" {
-        fmt.Println("ERROR argument --from not supplied")
-        return
-    }
-    if *tocity == "" {
-        fmt.Println("ERROR argument --to not supplied")
-        return
-    }
-    if *lookahead == -1 {
-        fmt.Println("ERROR argument --look-ahead not supplied")
-        return
-    }
-    if *duration == -1 {
-        fmt.Println("ERROR argument --duration not supplied")
-        return
-    }
+	flag.Parse()
+
+	if *fromcity == "" {
+		fmt.Println("ERROR argument --from not supplied")
+		return
+	}
+	if *tocity == "" {
+		fmt.Println("ERROR argument --to not supplied")
+		return
+	}
+	if *lookahead == -1 {
+		fmt.Println("ERROR argument --look-ahead not supplied")
+		return
+	}
+	if *duration == -1 {
+		fmt.Println("ERROR argument --duration not supplied")
+		return
+	}
 
 	outChan := make(chan *md.Offer)
 	inChan := make(chan *md.Payload)
 	offers := make([]*md.Offer, 0, 0)
 	sem := make(chan int, 3)
 
-    fromCity := *fromcity
-    toCity := *tocity
+	fromCity := *fromcity
+	toCity := *tocity
 
 	initialDate := ky.CalculateInitialDate(time.Now())
 	tripDuration := *duration
@@ -65,9 +67,9 @@ func main() {
 		fromCity, toCity, initialDate, tripDuration, datesToLookAhead, inChan, &wg,
 	)
 
-    go readOffers(
-        outChan, &offers, &wg,
-    )
+	go readOffers(
+		outChan, &offers, &wg,
+	)
 
 	ky.AsyncGetOfferForPayloads(inChan, outChan, sem)
 	wg.Wait()
@@ -75,6 +77,8 @@ func main() {
 	minOffer := calc.GetMinPriceOffer(offers)
 
 	notifyEnd(bot, fromCity, toCity, &tripDuration, minOffer)
+
+    saveOffersToDB(&offers, client)
 	cleanupFiles(offers)
 }
 
@@ -84,14 +88,14 @@ func notifyStart(bot *tg.Bot) {
 
 func notifyEnd(bot *tg.Bot, fromCity string, toCity string, tripDuration *int, offer *md.Offer) {
 	msgText := fmt.Sprintf(
-        "The best offer to travel for %d days from %s to %s is: Price %.2f, Departure: %s, Return: %s",
-        *tripDuration,
-        fromCity,
-        toCity,
-        offer.Price,
-        offer.DepartureDate.Format("2006-01-02"),
-        offer.ReturnDate.Format("2006-01-02"),
-    )
+		"The best offer to travel for %d days from %s to %s is: Price %.2f, Departure: %s, Return: %s",
+		*tripDuration,
+		fromCity,
+		toCity,
+		offer.Price,
+		offer.DepartureDate.Format("2006-01-02"),
+		offer.ReturnDate.Format("2006-01-02"),
+	)
 	tg.SendMessage(bot, msgText)
 
 	reader, err := os.Open(offer.Screenshot)
@@ -118,4 +122,24 @@ func readOffers(ch chan *md.Offer, offers *[]*md.Offer, wg *sync.WaitGroup) {
 		fmt.Println(v.String())
 		*offers = append(*offers, v)
 	}
+}
+
+func saveOffersToDB(offers *[]*md.Offer, client db.DBClient) {
+
+	for _, offer := range *offers {
+		db.Write_event_with_fluent_Style(
+			client,
+			db.AirlineOffer{
+				offer.Url,
+				offer.FromAirport,
+				offer.ToAirport,
+				offer.DepartureDate,
+				offer.ReturnDate,
+				offer.Price,
+				offer.CreatedOn,
+			},
+			db.Bucket,
+		)
+	}
+
 }

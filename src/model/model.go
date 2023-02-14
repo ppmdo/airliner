@@ -8,10 +8,14 @@ import (
 const Day = 24 * time.Hour
 
 type Offer struct {
-	Price         float64
+    Url string
+    FromAirport string
+    ToAirport string
 	DepartureDate time.Time
 	ReturnDate    time.Time
+	Price         float64
 	Screenshot    string
+    CreatedOn     time.Time
 }
 
 func (o *Offer) String() string {

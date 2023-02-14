@@ -14,7 +14,7 @@ func Test_write_event_with_fluent_Style(t *testing.T) {
 		datas []AirlineOffer
 	}{
 		{
-			name: "Write new record with line protocol",
+			name: "Write new record with fluent style",
 			// Your data Points
 			datas: mockData,
 			f: func(c influxdb2.Client, datas []AirlineOffer) {
