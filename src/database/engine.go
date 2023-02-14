@@ -151,7 +151,7 @@ func InitDB(envPath string) influxdb2.Client {
 	err := godotenv.Load(envPath) //load environement variable
 	if err != nil {
 		log.Println(err)
-		log.Fatal("Couldn't load ENVARS")
+		log.Println("Couldn't load ENVARS")
 	}
 
 	client, err := ConnectToInfluxDB() // create the client
