@@ -67,8 +67,8 @@ func main() {
 		fromCity, toCity, initialDate, tripDuration, datesToLookAhead, inChan, &wg,
 	)
 
-	go readOffers(
-		outChan, &offers, &wg,
+	go readAndSaveOffers(
+		outChan, &offers, &client, &wg,
 	)
 
 	ky.AsyncGetOfferForPayloads(inChan, outChan, sem)
@@ -78,7 +78,6 @@ func main() {
 
 	notifyEnd(bot, fromCity, toCity, &tripDuration, minOffer)
 
-    saveOffersToDB(&offers, client)
 	cleanupFiles(offers)
 }
 
@@ -115,20 +114,20 @@ func cleanupFiles(offers []*md.Offer) {
 	}
 }
 
-func readOffers(ch chan *md.Offer, offers *[]*md.Offer, wg *sync.WaitGroup) {
+func readAndSaveOffers(ch chan *md.Offer, offers *[]*md.Offer, client *db.DBClient, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for v := range ch {
 		fmt.Println(v.String())
 		*offers = append(*offers, v)
+        saveOfferToDB(client, v)
 	}
 }
 
-func saveOffersToDB(offers *[]*md.Offer, client db.DBClient) {
+func saveOfferToDB(client *db.DBClient, offer *md.Offer) {
 
-	for _, offer := range *offers {
 		db.Write_event_with_fluent_Style(
-			client,
+			*client,
 			db.AirlineOffer{
 				offer.Url,
 				offer.FromAirport,
@@ -140,6 +139,5 @@ func saveOffersToDB(offers *[]*md.Offer, client db.DBClient) {
 			},
 			db.Bucket,
 		)
-	}
 
 }
