@@ -69,18 +69,16 @@ func isReady(ctx *context.Context) (bool, error) {
     fmt.Println("Checking if ready...")
 
 	adviceText, err := getAdviceText(ctx)
-	for {
-		if adviceText != nil && !strings.Contains(*adviceText, "load"){
+    for {
+		if err != nil && !strings.Contains(*adviceText, "load"){
 			break
 		} else {
+            log.Println("Couldn't find advice text.")
 			time.Sleep(2 * time.Second)
 			adviceText, err = getAdviceText(ctx)
 		}
 	}
 
-    if err != nil {
-        return false, err
-    }
 
     for retries > 0 {
         nodeCount := countResultList(ctx)
