@@ -3,6 +3,7 @@ package database
 import (
     "context"
     "fmt"
+    "log"
     "reflect"
     "testing"
     "time"
@@ -13,6 +14,8 @@ import (
 )
 
 const bucket = "airliner"
+const testBucket = bucket + "TEST"
+
 const org = "iot"
 type AirlineOffer struct {
     Url string
@@ -48,7 +51,7 @@ func Test_write_event_with_line_protocol(t *testing.T) {
             f: func(c influxdb2.Client, datas []AirlineOffer) {
                 // Send all the data to the DB
                 for _, data := range datas {
-                    write_event_with_line_protocol(c, data)
+                    write_event_with_line_protocol(c, data, testBucket)
                 }
             },
             },
@@ -63,7 +66,7 @@ func Test_write_event_with_line_protocol(t *testing.T) {
                     time.Sleep(time.Millisecond * 1000)
 
                     // Option one: QueryTableResult
-                    results := read_events_as_query_table_result(client)
+                    results := read_events_as_query_table_result(client, testBucket)
                     // convert results to array to compare with data
                     resultsArr := []AirlineOffer{}
                     for _, v := range results {
@@ -76,7 +79,7 @@ func Test_write_event_with_line_protocol(t *testing.T) {
 
                     // Option two: query raw data
                     // TODO add validation
-                    read_events_as_raw_string(client)
+                    read_events_as_raw_string(client, testBucket)
 
                     client.Close()
                 })
@@ -96,7 +99,7 @@ func Test_write_event_with_params_constructor(t *testing.T) {
             f: func(c influxdb2.Client, datas []AirlineOffer) {
                 // Send all the data to the DB
                 for _, data := range datas {
-                    write_event_with_params_constror(c, data)
+                    write_event_with_params_constror(c, data, testBucket)
                 }
             },
             },
@@ -115,6 +118,7 @@ func Test_write_event_with_params_constructor(t *testing.T) {
 
 func init_testDB(t *testing.T) influxdb2.Client {
     t.Helper()                                 // Tells `go test` that this is an helper
+
     godotenv.Load("../../test_influxdb.env")   //load environement variable
     client, err := ConnectToInfluxDB() // create the client
 
@@ -125,14 +129,14 @@ func init_testDB(t *testing.T) influxdb2.Client {
     // Clean the database by deleting the bucket
     ctx := context.Background()
     bucketsAPI := client.BucketsAPI()
-    dBucket, err := bucketsAPI.FindBucketByName(ctx, bucket)
+    dBucket, err := bucketsAPI.FindBucketByName(ctx, testBucket)
     if err == nil {
         client.BucketsAPI().DeleteBucketWithID(context.Background(), *dBucket.Id)
     }
 
     // create new empty bucket
     dOrg, _ := client.OrganizationsAPI().FindOrganizationByName(ctx, org)
-    _, err = client.BucketsAPI().CreateBucketWithNameWithID(ctx, *dOrg.Id, bucket)
+    _, err = client.BucketsAPI().CreateBucketWithNameWithID(ctx, *dOrg.Id, testBucket)
 
     if err != nil {
         t.Errorf("impossible to new create bucket")
@@ -141,9 +145,34 @@ func init_testDB(t *testing.T) influxdb2.Client {
     return client
 }
 
-func write_event_with_line_protocol(client influxdb2.Client, t AirlineOffer) {
+func init_DB() influxdb2.Client {
+    godotenv.Load("../../test_influxdb.env")   //load environement variable
+    client, err := ConnectToInfluxDB() // create the client
+
+    if err != nil {
+        log.Fatal("impossible to connect to DB")
+    }
+
+    ctx := context.Background()
+    bucketsAPI := client.BucketsAPI()
+    _, err = bucketsAPI.FindBucketByName(ctx, bucket)
+    if err == nil {
+
+        // create new empty bucket
+        dOrg, _ := client.OrganizationsAPI().FindOrganizationByName(ctx, org)
+        _, err = client.BucketsAPI().CreateBucketWithNameWithID(ctx, *dOrg.Id, bucket)
+
+        if err != nil {
+            log.Fatal("impossible to new create bucket")
+        }
+    }
+
+    return client
+}
+
+func write_event_with_line_protocol(client influxdb2.Client, t AirlineOffer, dbBucket string) {
     // get non-blocking write client
-    writeAPI := client.WriteAPI(org, bucket)
+    writeAPI := client.WriteAPI(org, dbBucket)
     // write line protocol
     writeAPI.WriteRecord(
         fmt.Sprintf("airlineOffer,unit=euro,url=%s,fromAirport=%s,toAirport=%s,departureDate=%s,returnDate=%s,price=%f,createdOn=%s",
@@ -154,9 +183,9 @@ func write_event_with_line_protocol(client influxdb2.Client, t AirlineOffer) {
 }
 
 
-func Write_event_with_fluent_Style(client influxdb2.Client, t AirlineOffer) {
+func Write_event_with_fluent_Style(client influxdb2.Client, t AirlineOffer, dbBucket string) {
     // Use blocking write client for writes to desired bucket
-    writeAPI := client.WriteAPI(org, bucket)
+    writeAPI := client.WriteAPI(org, dbBucket)
     // create point using fluent style
     p := influxdb2.NewPointWithMeasurement("airlineOffer").
         AddTag("unit", "euro").
@@ -173,9 +202,9 @@ func Write_event_with_fluent_Style(client influxdb2.Client, t AirlineOffer) {
     writeAPI.Flush()
 }
 
-func write_event_with_params_constror(client influxdb2.Client, t AirlineOffer) {
+func write_event_with_params_constror(client influxdb2.Client, t AirlineOffer, dbBucket string) {
     // Use blocking write client for writes to desired bucket
-    writeAPI := client.WriteAPI(org, bucket)
+    writeAPI := client.WriteAPI(org, dbBucket)
     // Create point using full params constructor
     p := influxdb2.NewPoint("airlineOffer",
         map[string]string{"unit": "euro"},
@@ -188,22 +217,22 @@ func write_event_with_params_constror(client influxdb2.Client, t AirlineOffer) {
     writeAPI.Flush()
 }
 
-func write_event_with_blocking_write(client influxdb2.Client) {
+func write_event_with_blocking_write(client influxdb2.Client, dbBucket string) {
     // Get blocking write client
-    writeAPI := client.WriteAPIBlocking(org, bucket)
+    writeAPI := client.WriteAPIBlocking(org, dbBucket)
 
     // write line protocol
     writeAPI.WriteRecord(context.Background(), fmt.Sprintf("stat,unit=temperature1 avg=%f,max=%f", 23.5, 45.0))
 }
 
-func read_events_as_query_table_result(client influxdb2.Client) map[time.Time]AirlineOffer {
+func read_events_as_query_table_result(client influxdb2.Client, dbBucket string) map[time.Time]AirlineOffer {
 
     // Get query client
     queryAPI := client.QueryAPI(org)
 
     // Query. You need to change a bit the Query from the Query Builder
     // Otherwise it won't work
-    fluxQuery := fmt.Sprintf(`from(bucket: "airliner")
+    fluxQuery := fmt.Sprintf(`from(bucket: "` + dbBucket + `")
 |> range(start: -1h)
 |> filter(fn: (r) => r["_measurement"] == "airlineOffer")
 |> yield(name: "mean")`)
@@ -264,12 +293,12 @@ func read_events_as_query_table_result(client influxdb2.Client) map[time.Time]Ai
 
 }
 
-func read_events_as_raw_string(client influxdb2.Client) {
+func read_events_as_raw_string(client influxdb2.Client, dbBucket string) {
     // Get query client
     queryAPI := client.QueryAPI(org)
 
     // Query
-    fluxQuery := fmt.Sprintf(`from(bucket: "airliner")
+    fluxQuery := fmt.Sprintf(`from(bucket: "`+ dbBucket +`")
 |> range(start: -1h)
 |> filter(fn: (r) => r["_measurement"] == "airlineOffer")
 |> yield(name: "mean")`)
