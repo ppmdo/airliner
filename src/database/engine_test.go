@@ -20,7 +20,7 @@ func Test_write_event_with_fluent_Style(t *testing.T) {
 			f: func(c influxdb2.Client, datas []AirlineOffer) {
 				// Send all the data to the DB
 				for _, data := range datas {
-					Write_event_with_fluent_Style(c, data)
+					Write_event_with_fluent_Style(c, data, testBucket)
 				}
 			},
 		},
@@ -36,7 +36,7 @@ func Test_write_event_with_fluent_Style(t *testing.T) {
 			time.Sleep(time.Millisecond * 1000)
 
 			// Option one: QueryTableResult
-			results := read_events_as_query_table_result(client)
+			results := read_events_as_query_table_result(client, testBucket)
 			// convert results to array to compare with data
 			resultsArr := []AirlineOffer{}
 			for _, v := range results {
@@ -49,7 +49,7 @@ func Test_write_event_with_fluent_Style(t *testing.T) {
 
 			// Option two: query raw data
 			// TODO add validation
-			read_events_as_raw_string(client)
+			read_events_as_raw_string(client, testBucket)
 
 			client.Close()
 		})
