@@ -1,21 +1,35 @@
 package kayak
 
 import (
-    "context"
-    "errors"
-    "fmt"
+	"context"
+	"errors"
+	"fmt"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
-    "log"
-    "os"
-    "strconv"
-    "strings"
-    "sync"
-    "time"
+	"log"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 
-    md "airliner/model"
+	md "airliner/model"
 )
+
+func takeScreenshot(ctx *context.Context, buff *[]byte) {
+	if err := chromedp.Run(*ctx,
+		chromedp.CaptureScreenshot(buff),
+	); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func getHtml(ctx *context.Context, html *string) {
+	if err := chromedp.Run(*ctx, chromedp.OuterHTML("/", html)); err != nil {
+		log.Fatal(err)
+	}
+}
 
 func takeAndSaveScreenshot(ctx *context.Context, fname string) string {
 	var buff []byte
@@ -34,14 +48,39 @@ func takeAndSaveScreenshot(ctx *context.Context, fname string) string {
 	return fname
 }
 
+func createFilename(timestamp string, base string, ext string) string {
+	return fmt.Sprintf("%s-%s.%s", timestamp, base, ext)
+}
+
+func writeDebugData(prefix string, screenshot []byte, html string) {
+	tstamp := time.Now().Format("2006_01_02__15_04_05")
+	htmlFname := createFilename(tstamp, prefix, "html")
+	screenshotFname := createFilename(tstamp, prefix, "png")
+
+	if err := os.WriteFile(screenshotFname, screenshot, 0o644); err != nil {
+		log.Fatal(err)
+	}
+
+	f, err := os.Create(htmlFname)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	_, err = f.WriteString(html)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 func getAdviceText(ctx *context.Context) (*string, error) {
 	adviceSelector := "[class$=\"-advice\"]"
-	var adviceText string
+	var adviceText = ""
 
 	if err := chromedp.Run(*ctx,
 		chromedp.Text(adviceSelector, &adviceText, chromedp.ByQuery, chromedp.AtLeast(0)),
-	); err != nil {
-        return nil, errors.New("couldn't find advice text")
+	); err != nil || adviceText == "" {
+		return nil, errors.New("couldn't find advice text")
 	}
 
 	adviceText = strings.ToLower(adviceText)
@@ -49,49 +88,54 @@ func getAdviceText(ctx *context.Context) (*string, error) {
 }
 
 func countResultList(ctx *context.Context) int {
-    selector := "//div[@data-resultid and contains(., 'Best')]"
-    nodes := make([]*cdp.Node, 10)
+	selector := "//div[@data-resultid and contains(., 'Best')]"
+	nodes := make([]*cdp.Node, 10)
 
-    if err := chromedp.Run(*ctx,
-        chromedp.Nodes(selector, &nodes, chromedp.AtLeast(0)),
-        ); err != nil {
-            fmt.Println(err)
-            return 0
-        }
+	if err := chromedp.Run(*ctx,
+		chromedp.Nodes(selector, &nodes, chromedp.AtLeast(0)),
+	); err != nil {
+		fmt.Println(err)
+		return 0
+	}
 
-    fmt.Printf("Found %d result nodes.\n", len(nodes))
-    return len(nodes)
+	fmt.Printf("Found %d result nodes.\n", len(nodes))
+	return len(nodes)
 }
 
 func isReady(ctx *context.Context) (bool, error) {
-    retries := 5
+	retries := 5
 
-    fmt.Println("Checking if ready...")
+	fmt.Println("Checking if ready...")
 
 	adviceText, err := getAdviceText(ctx)
-    for {
-		if err != nil && !strings.Contains(*adviceText, "load"){
+	for retries > 0 {
+		if err == nil && !strings.Contains(*adviceText, "load") {
 			break
 		} else {
-            log.Println("Couldn't find advice text.")
+			log.Printf("Couldn't find advice text. Retrying... (Retries left: %d)\n", retries)
 			time.Sleep(2 * time.Second)
 			adviceText, err = getAdviceText(ctx)
+			retries--
 		}
 	}
 
+	if err != nil {
+		return false, errors.New("advice text not found")
+	}
 
-    for retries > 0 {
-        nodeCount := countResultList(ctx)
-        if nodeCount > 0 {
-            return true, nil
-        } else {
-            fmt.Printf("Didn't find results section, retrying... (Retries left: %d)\n", retries)
-            retries--
-            time.Sleep(time.Second)
-        }
-    }
+	retries = 5
+	for retries > 0 {
+		nodeCount := countResultList(ctx)
+		if nodeCount > 0 {
+			return true, nil
+		} else {
+			fmt.Printf("Didn't find results section, retrying... (Retries left: %d)\n", retries)
+			retries--
+			time.Sleep(time.Second)
+		}
+	}
 
-    return false, errors.New("result section not found")
+	return false, errors.New("result section not found")
 }
 
 func findBestOfferPrice(ctx *context.Context) *string {
@@ -101,22 +145,22 @@ func findBestOfferPrice(ctx *context.Context) *string {
 
 	selector := "//div[@data-resultid and contains(., 'Best')]"
 
-    repeat := 3
-    for {
-        if err := chromedp.Run(*ctx,
-            chromedp.Nodes(selector, &nodes),
-            ); err != nil {
-            log.Fatal(err)
-        }
-        if len(nodes) > 0 {
-            break
+	repeat := 3
+	for {
+		if err := chromedp.Run(*ctx,
+			chromedp.Nodes(selector, &nodes),
+		); err != nil {
+			log.Fatal(err)
+		}
+		if len(nodes) > 0 {
+			break
 
-        } else {
-            fmt.Println("Couldn't find best offer, retrying...")
-            time.Sleep(time.Second)
-            repeat --
-        }
-    }
+		} else {
+			fmt.Println("Couldn't find best offer, retrying...")
+			time.Sleep(time.Second)
+			repeat--
+		}
+	}
 
 	if err := chromedp.Run(*ctx,
 		chromedp.Text("[class$=price-text]", &result, chromedp.FromNode(nodes[0])),
@@ -124,7 +168,7 @@ func findBestOfferPrice(ctx *context.Context) *string {
 		log.Fatal(err)
 	}
 
-    println("Found best offer...")
+	println("Found best offer...")
 	return &result
 }
 
@@ -141,9 +185,9 @@ func AsyncGetOfferForPayloads(inChan chan *md.Payload, outChan chan *md.Offer, s
 
 		sem <- 1
 		off, _ := GetOfferForPayload(v)
-        if off != nil {
-            outChan <- off
-        }
+		if off != nil {
+			outChan <- off
+		}
 		<-sem
 	}
 
@@ -156,7 +200,6 @@ func AsyncGetOfferForPayloads(inChan chan *md.Payload, outChan chan *md.Offer, s
 
 	wg.Wait()
 }
-
 
 func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 	fmt.Println(fmt.Sprintf("Getting %s", payload.DateString()))
@@ -176,7 +219,7 @@ func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 	ctx, cancel = context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	url := "https://www.kayak.com/flights/"+ payload.FromCity + "-" + payload.ToCity + "/" + payload.DateString() + "?sort=bestflight_a&fs=stops=~0"
+	url := "https://www.kayak.com/flights/" + payload.FromCity + "-" + payload.ToCity + "/" + payload.DateString() + "?sort=bestflight_a&fs=stops=~0"
 
 	// set the viewport size, to know what screenshot size to expect
 	width, height := 1024, 768
@@ -188,16 +231,22 @@ func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 		log.Fatal(err)
 	}
 
-	for {
-		rdy, err := isReady(&ctx)
-        if rdy {
-			break
-		} else {
-            return nil, err
-        }
-	}
-
+	rdy, err := isReady(&ctx)
 	screenshot := takeAndSaveScreenshot(&ctx, fmt.Sprintf("%d", payload.Id))
+
+	if !rdy || err != nil {
+		return &md.Offer{
+			url,
+			payload.FromCity,
+			payload.ToCity,
+			payload.DepartureDate,
+			payload.ReturnDate,
+			-1,
+			screenshot,
+			time.Now(),
+			false,
+		}, nil
+	}
 
 	bestPrice := findBestOfferPrice(&ctx)
 
@@ -207,13 +256,14 @@ func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 	}
 
 	return &md.Offer{
-        url,
-        payload.FromCity,
-        payload.ToCity,
+		url,
+		payload.FromCity,
+		payload.ToCity,
 		payload.DepartureDate,
 		payload.ReturnDate,
-        v,
+		v,
 		screenshot,
-        time.Now(),
+		time.Now(),
+		true,
 	}, nil
 }

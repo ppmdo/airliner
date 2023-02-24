@@ -46,7 +46,8 @@ func main() {
 
 	outChan := make(chan *md.Offer)
 	inChan := make(chan *md.Payload)
-	offers := make([]*md.Offer, 0, 0)
+	successfullOffers := make([]*md.Offer, 0, 0)
+	failedOffers := make([]*md.Offer, 0, 0)
 	sem := make(chan int, 3)
 
 	fromCity := *fromcity
@@ -68,21 +69,46 @@ func main() {
 	)
 
 	go readAndSaveOffers(
-		outChan, &offers, &client, &wg,
+		outChan, &successfullOffers, &failedOffers, &client, &wg,
 	)
 
 	ky.AsyncGetOfferForPayloads(inChan, outChan, sem)
 	wg.Wait()
 
-	minOffer := calc.GetMinPriceOffer(offers)
+    if len(successfullOffers) == 0 {
+        msg := "Couldn't get any offers. Something might be wrong."
+        log.Println(msg)
+        notifyError(bot, msg)
+    } else {
+        minOffer := calc.GetMinPriceOffer(successfullOffers)
+    	notifyEnd(bot, fromCity, toCity, &tripDuration, minOffer)
+    }
 
-	notifyEnd(bot, fromCity, toCity, &tripDuration, minOffer)
+    for _, o := range failedOffers {
+        notifyFailedOffer(bot, o)
+    }
 
-	cleanupFiles(offers)
+    cleanupFiles(successfullOffers)
+    cleanupFiles(failedOffers)
+
 }
 
 func notifyStart(bot *tg.Bot) {
 	tg.SendMessage(bot, "Hi there... Query operation starting...")
+}
+
+func notifyError(bot *tg.Bot, msg string) {
+    tg.SendMessage(bot, fmt.Sprintf("ERROR: %s", msg))
+}
+
+func notifyFailedOffer(bot *tg.Bot, offer *md.Offer) {
+    tg.SendMessage(bot, "Couldn't fetch offer. Debug data follows.")
+
+	reader, err := os.Open(offer.Screenshot)
+	if err != nil {
+		log.Panic(err)
+	}
+	tg.SendImage(bot, offer.Screenshot, reader)
 }
 
 func notifyEnd(bot *tg.Bot, fromCity string, toCity string, tripDuration *int, offer *md.Offer) {
@@ -114,13 +140,17 @@ func cleanupFiles(offers []*md.Offer) {
 	}
 }
 
-func readAndSaveOffers(ch chan *md.Offer, offers *[]*md.Offer, client *db.DBClient, wg *sync.WaitGroup) {
+func readAndSaveOffers(ch chan *md.Offer, successfulOffers *[]*md.Offer, failedOffers *[]*md.Offer, client *db.DBClient, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	for v := range ch {
-		fmt.Println(v.String())
-		*offers = append(*offers, v)
-        saveOfferToDB(client, v)
+    for v := range ch {
+        fmt.Println(v.String())
+        if v.FetchSuccessful {
+            *successfulOffers = append(*successfulOffers, v)
+            saveOfferToDB(client, v)
+        } else {
+            *failedOffers = append(*failedOffers, v)
+        }
 	}
 }
 
