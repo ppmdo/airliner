@@ -16,6 +16,8 @@ type Offer struct {
 	Price         float64
 	Screenshot    string
     CreatedOn     time.Time
+
+    FetchSuccessful bool
 }
 
 func (o *Offer) String() string {
