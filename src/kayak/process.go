@@ -113,7 +113,7 @@ func isReady(ctx *context.Context) (bool, error) {
 			break
 		} else {
 			log.Printf("Couldn't find advice text. Retrying... (Retries left: %d)\n", retries)
-			time.Sleep(2 * time.Second)
+			time.Sleep(3 * time.Second)
 			adviceText, err = getAdviceText(ctx)
 			retries--
 		}
@@ -216,7 +216,7 @@ func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 	defer cancel()
 
 	// create a timeout
-	ctx, cancel = context.WithTimeout(ctx, time.Minute)
+	ctx, cancel = context.WithTimeout(ctx, time.Minute * 5)
 	defer cancel()
 
 	url := "https://www.kayak.com/flights/" + payload.FromCity + "-" + payload.ToCity + "/" + payload.DateString() + "?sort=bestflight_a&fs=stops=~0"
