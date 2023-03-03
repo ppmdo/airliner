@@ -22,6 +22,7 @@ func main() {
 	var tocity = flag.String("to", "", "3 letter upercase code for the city flying to.")
 	var lookahead = flag.Int("look-ahead", -1, "number of days to look ahead")
 	var duration = flag.Int("duration", -1, "journey duration")
+	var concurrency = flag.Int("concurrency", 2, "max num. of concurrent jobs")
 
     var client = db.InitDB("test_influxdb.env")
 
@@ -48,7 +49,7 @@ func main() {
 	inChan := make(chan *md.Payload)
 	successfullOffers := make([]*md.Offer, 0, 0)
 	failedOffers := make([]*md.Offer, 0, 0)
-	sem := make(chan int, 3)
+	sem := make(chan int, *concurrency)
 
 	fromCity := *fromcity
 	toCity := *tocity
