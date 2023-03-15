@@ -18,13 +18,15 @@ import (
 func main() {
 	var wg sync.WaitGroup
 
+	var initialDate time.Time
 	var fromcity = flag.String("from", "", "3 letter upercase code for the city flying from.")
 	var tocity = flag.String("to", "", "3 letter upercase code for the city flying to.")
 	var lookahead = flag.Int("look-ahead", -1, "number of days to look ahead")
 	var duration = flag.Int("duration", -1, "journey duration")
 	var concurrency = flag.Int("concurrency", 2, "max num. of concurrent jobs")
+	var startdate = flag.String("start-date", "", "initial day to lookup")
 
-    var client = db.InitDB("test_influxdb.env")
+	var client = db.InitDB("test_influxdb.env")
 
 	flag.Parse()
 
@@ -41,8 +43,7 @@ func main() {
 		return
 	}
 	if *duration == -1 {
-		fmt.Println("ERROR argument --duration not supplied")
-		return
+		fmt.Println("--duration not supplied, assuming 'single ticket' mode")
 	}
 
 	outChan := make(chan *md.Offer)
@@ -54,7 +55,15 @@ func main() {
 	fromCity := *fromcity
 	toCity := *tocity
 
-	initialDate := ky.CalculateInitialDate(time.Now())
+	if *startdate == "" {
+		initialDate = ky.CalculateInitialDate(time.Now())
+	} else {
+		parsed, err := time.Parse("2006-01-02", *startdate)
+		if err != nil {
+			log.Panicf("Unable to parse --start-date value '%s'. Format should be YYYY-MM-DD.\n", *startdate)
+		}
+		initialDate = parsed
+	}
 	tripDuration := *duration
 	datesToLookAhead := *lookahead
 
@@ -76,21 +85,21 @@ func main() {
 	ky.AsyncGetOfferForPayloads(inChan, outChan, sem)
 	wg.Wait()
 
-    if len(successfullOffers) == 0 {
-        msg := "Couldn't get any offers. Something might be wrong."
-        log.Println(msg)
-        notifyError(bot, msg)
-    } else {
-        minOffer := calc.GetMinPriceOffer(successfullOffers)
-    	notifyEnd(bot, fromCity, toCity, &tripDuration, minOffer)
-    }
+	if len(successfullOffers) == 0 {
+		msg := "Couldn't get any offers. Something might be wrong."
+		log.Println(msg)
+		notifyError(bot, msg)
+	} else {
+		minOffer := calc.GetMinPriceOffer(successfullOffers)
+		notifyEnd(bot, minOffer)
+	}
 
-    for _, o := range failedOffers {
-        notifyFailedOffer(bot, o)
-    }
+	for _, o := range failedOffers {
+		notifyFailedOffer(bot, o)
+	}
 
-    cleanupFiles(successfullOffers)
-    cleanupFiles(failedOffers)
+	cleanupFiles(successfullOffers)
+	cleanupFiles(failedOffers)
 
 }
 
@@ -99,11 +108,11 @@ func notifyStart(bot *tg.Bot) {
 }
 
 func notifyError(bot *tg.Bot, msg string) {
-    tg.SendMessage(bot, fmt.Sprintf("ERROR: %s", msg))
+	tg.SendMessage(bot, fmt.Sprintf("ERROR: %s", msg))
 }
 
 func notifyFailedOffer(bot *tg.Bot, offer *md.Offer) {
-    tg.SendMessage(bot, "Couldn't fetch offer. Debug data follows.")
+	tg.SendMessage(bot, "Couldn't fetch offer. Debug data follows.")
 
 	reader, err := os.Open(offer.Screenshot)
 	if err != nil {
@@ -112,17 +121,34 @@ func notifyFailedOffer(bot *tg.Bot, offer *md.Offer) {
 	tg.SendImage(bot, offer.Screenshot, reader)
 }
 
-func notifyEnd(bot *tg.Bot, fromCity string, toCity string, tripDuration *int, offer *md.Offer) {
-	msgText := fmt.Sprintf(
-		"The best offer to travel for %d days from %s to %s is: Price %.2f, Departure: %s, Return: %s",
-		*tripDuration,
-		fromCity,
-		toCity,
-		offer.Price,
-		offer.DepartureDate.Format("2006-01-02"),
-		offer.ReturnDate.Format("2006-01-02"),
-	)
-	tg.SendMessage(bot, msgText)
+func createEndMessage(offer *md.Offer) string {
+	var msgText string
+
+	if offer.ReturnDate.IsZero() {
+		msgText = fmt.Sprintf(
+			"The best single ticket offer to travel from %s to %s is: Price %.2f, Departure: %s",
+			offer.FromAirport,
+			offer.ToAirport,
+			offer.Price,
+			offer.DepartureDate.Format("2006-01-02"),
+		)
+	} else {
+		msgText = fmt.Sprintf(
+			"The best round trip offer to travel for %d days from %s to %s is: Price %.2f, Departure: %s, Return: %s",
+			int(offer.ReturnDate.Sub(offer.DepartureDate).Hours()/24),
+			offer.FromAirport,
+			offer.ToAirport,
+			offer.Price,
+			offer.DepartureDate.Format("2006-01-02"),
+			offer.ReturnDate.Format("2006-01-02"),
+		)
+	}
+
+	return msgText
+}
+
+func notifyEnd(bot *tg.Bot, offer *md.Offer) {
+	tg.SendMessage(bot, createEndMessage(offer))
 
 	reader, err := os.Open(offer.Screenshot)
 	if err != nil {
@@ -144,31 +170,31 @@ func cleanupFiles(offers []*md.Offer) {
 func readAndSaveOffers(ch chan *md.Offer, successfulOffers *[]*md.Offer, failedOffers *[]*md.Offer, client *db.DBClient, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-    for v := range ch {
-        fmt.Println(v.String())
-        if v.FetchSuccessful {
-            *successfulOffers = append(*successfulOffers, v)
-            saveOfferToDB(client, v)
-        } else {
-            *failedOffers = append(*failedOffers, v)
-        }
+	for v := range ch {
+		fmt.Println(v.String())
+		if v.FetchSuccessful {
+			*successfulOffers = append(*successfulOffers, v)
+			saveOfferToDB(client, v)
+		} else {
+			*failedOffers = append(*failedOffers, v)
+		}
 	}
 }
 
 func saveOfferToDB(client *db.DBClient, offer *md.Offer) {
 
-		db.Write_event_with_fluent_Style(
-			*client,
-			db.AirlineOffer{
-				offer.Url,
-				offer.FromAirport,
-				offer.ToAirport,
-				offer.DepartureDate,
-				offer.ReturnDate,
-				offer.Price,
-				offer.CreatedOn,
-			},
-			db.Bucket,
-		)
+	db.Write_event_with_fluent_Style(
+		*client,
+		db.AirlineOffer{
+			Url:           offer.Url,
+			FromAirport:   offer.FromAirport,
+			ToAirport:     offer.ToAirport,
+			DepartureDate: offer.DepartureDate,
+			ReturnDate:    offer.ReturnDate,
+			Price:         offer.Price,
+			CreatedOn:     offer.CreatedOn,
+		},
+		db.Bucket,
+	)
 
 }

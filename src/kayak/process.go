@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/emulation"
-	"github.com/chromedp/chromedp"
 	"log"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/emulation"
+	"github.com/chromedp/chromedp"
+	"github.com/google/uuid"
 
 	md "airliner/model"
 )
@@ -88,8 +91,8 @@ func getAdviceText(ctx *context.Context) (*string, error) {
 }
 
 func countResultList(ctx *context.Context) int {
-	selector := "//div[@data-resultid and contains(., 'Best')]"
-	nodes := make([]*cdp.Node, 10)
+	selector := "//div[@data-resultid]"
+	nodes := make([]*cdp.Node, 25)
 
 	if err := chromedp.Run(*ctx,
 		chromedp.Nodes(selector, &nodes, chromedp.AtLeast(0)),
@@ -104,34 +107,42 @@ func countResultList(ctx *context.Context) int {
 
 func isReady(ctx *context.Context) (bool, error) {
 	retries := 5
+	sleepMultiplier := 2
+	var err error
+	var adviceText *string
 
 	fmt.Println("Checking if ready...")
 
-	adviceText, err := getAdviceText(ctx)
 	for retries > 0 {
+		adviceText, err = getAdviceText(ctx)
+
 		if err == nil && !strings.Contains(*adviceText, "load") {
 			break
 		} else {
-			log.Printf("Couldn't find advice text. Retrying... (Retries left: %d)\n", retries)
-			time.Sleep(3 * time.Second)
-			adviceText, err = getAdviceText(ctx)
+			log.Printf("Couldn't find advice text. Retrying in %d seconds... (Retries left: %d)\n", sleepMultiplier, retries)
+			time.Sleep(time.Duration(sleepMultiplier) * time.Second)
+
 			retries--
+			sleepMultiplier *= 2
 		}
 	}
 
-	if err != nil {
+	if adviceText == nil {
 		return false, errors.New("advice text not found")
 	}
 
 	retries = 5
+	sleepMultiplier = 2
 	for retries > 0 {
 		nodeCount := countResultList(ctx)
 		if nodeCount > 0 {
 			return true, nil
 		} else {
-			fmt.Printf("Didn't find results section, retrying... (Retries left: %d)\n", retries)
+			fmt.Printf("Didn't find results section. Retrying in %d seconds... (Retries left: %d)\n", sleepMultiplier, retries)
+			time.Sleep(time.Duration(sleepMultiplier) * time.Second)
+
 			retries--
-			time.Sleep(time.Second)
+			sleepMultiplier *= 2
 		}
 	}
 
@@ -143,7 +154,7 @@ func findBestOfferPrice(ctx *context.Context) *string {
 	var nodes = make([]*cdp.Node, 10)
 	var result string
 
-	selector := "//div[@data-resultid and contains(., 'Best')]"
+	selector := "//div[@data-resultid]"
 
 	repeat := 3
 	for {
@@ -201,13 +212,27 @@ func AsyncGetOfferForPayloads(inChan chan *md.Payload, outChan chan *md.Offer, s
 	wg.Wait()
 }
 
+func remove(s []func(*chromedp.ExecAllocator), i int) []func(*chromedp.ExecAllocator) {
+	s[i] = s[len(s)-1]
+	return s[:len(s)-1]
+}
+
 func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 	fmt.Println(fmt.Sprintf("Getting %s", payload.DateString()))
+	var headless = true
+
+	userDataDir := path.Join(os.TempDir(), "airliner-chrome"+uuid.NewString())
 
 	opts := append(
 		chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 11_2_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36"),
+		chromedp.UserDataDir(userDataDir),
+		chromedp.UserAgent("Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/109.0"),
 	)
+
+	if !headless {
+		// Remove Headless
+		opts = remove(opts, 2)
+	}
 
 	alloCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
@@ -216,10 +241,12 @@ func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 	defer cancel()
 
 	// create a timeout
-	ctx, cancel = context.WithTimeout(ctx, time.Minute * 5)
+	ctx, cancel = context.WithTimeout(ctx, time.Minute*5)
 	defer cancel()
 
-	url := "https://www.kayak.com/flights/" + payload.FromCity + "-" + payload.ToCity + "/" + payload.DateString() + "?sort=bestflight_a&fs=stops=~0"
+	url := "https://www.kayak.com/flights/" + payload.FromCity + "-" + payload.ToCity + "/" + payload.DateString() + "?sort=price_a&fs=stops=~0"
+
+	log.Printf("Fetching: %s\n", url)
 
 	// set the viewport size, to know what screenshot size to expect
 	width, height := 1024, 768
@@ -236,15 +263,15 @@ func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 
 	if !rdy || err != nil {
 		return &md.Offer{
-			url,
-			payload.FromCity,
-			payload.ToCity,
-			payload.DepartureDate,
-			payload.ReturnDate,
-			-1,
-			screenshot,
-			time.Now(),
-			false,
+			Url:             url,
+			FromAirport:     payload.FromCity,
+			ToAirport:       payload.ToCity,
+			DepartureDate:   payload.DepartureDate,
+			ReturnDate:      payload.ReturnDate,
+			Price:           -1,
+			Screenshot:      screenshot,
+			CreatedOn:       time.Now(),
+			FetchSuccessful: false,
 		}, nil
 	}
 
@@ -256,14 +283,14 @@ func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 	}
 
 	return &md.Offer{
-		url,
-		payload.FromCity,
-		payload.ToCity,
-		payload.DepartureDate,
-		payload.ReturnDate,
-		v,
-		screenshot,
-		time.Now(),
-		true,
+		Url:             url,
+		FromAirport:     payload.FromCity,
+		ToAirport:       payload.ToCity,
+		DepartureDate:   payload.DepartureDate,
+		ReturnDate:      payload.ReturnDate,
+		Price:           v,
+		Screenshot:      screenshot,
+		CreatedOn:       time.Now(),
+		FetchSuccessful: true,
 	}, nil
 }
