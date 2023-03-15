@@ -1,23 +1,23 @@
 package model
 
 import (
-    "fmt"
-    "time"
+	"fmt"
+	"time"
 )
 
 const Day = 24 * time.Hour
 
 type Offer struct {
-    Url string
-    FromAirport string
-    ToAirport string
+	Url           string
+	FromAirport   string
+	ToAirport     string
 	DepartureDate time.Time
 	ReturnDate    time.Time
 	Price         float64
 	Screenshot    string
-    CreatedOn     time.Time
+	CreatedOn     time.Time
 
-    FetchSuccessful bool
+	FetchSuccessful bool
 }
 
 func (o *Offer) String() string {
@@ -25,8 +25,8 @@ func (o *Offer) String() string {
 }
 
 type Payload struct {
-    FromCity string
-    ToCity string
+	FromCity      string
+	ToCity        string
 	DepartureDate time.Time
 	ReturnDate    time.Time
 	Id            int
@@ -34,7 +34,13 @@ type Payload struct {
 
 func (p *Payload) DateString() string {
 	a := p.DepartureDate.Format("2006-01-02")
-	b := p.ReturnDate.Format("2006-01-02")
 
-	return fmt.Sprintf("%s/%s", a, b)
+	if p.ReturnDate.IsZero() {
+		return fmt.Sprintf("%s/", a)
+
+	} else {
+
+		b := p.ReturnDate.Format("2006-01-02")
+		return fmt.Sprintf("%s/%s", a, b)
+	}
 }

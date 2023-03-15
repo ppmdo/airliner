@@ -203,9 +203,15 @@ func Write_event_with_fluent_Style(client influxdb2.Client, t AirlineOffer, dbBu
 		AddTag("fromAirport", t.FromAirport).
 		AddTag("toAirport", t.ToAirport).
 		AddTag("departureDate", t.DepartureDate.Format("2006-01-02")).
-		AddTag("returnDate", t.ReturnDate.Format("2006-01-02")).
 		AddField("price", t.Price).
 		SetTime(t.CreatedOn)
+
+	if t.ReturnDate.IsZero() {
+		p.AddTag("tripMode", "single")
+	} else {
+		p.AddTag("tripMode", "round").AddTag("returnDate", t.ReturnDate.Format("2006-01-02"))
+	}
+
 	writeAPI.WritePoint(p)
 	// Flush writes
 	writeAPI.Flush()
@@ -280,18 +286,18 @@ func read_events_as_query_table_result(client influxdb2.Client, dbBucket string)
 			for k, v := range result.Record().Values() {
 				switch k {
 				case "fromAirport":
-                    val.FromAirport = v.(string)
+					val.FromAirport = v.(string)
 				case "toAirport":
 					val.ToAirport = v.(string)
 				case "departureDate":
-                    val.DepartureDate, _ = time.Parse("2006-01-02", v.(string))
+					val.DepartureDate, _ = time.Parse("2006-01-02", v.(string))
 				case "returnDate":
 					val.ReturnDate, _ = time.Parse("2006-01-02", v.(string))
 				default:
 					fmt.Printf("unrecognized field %s.\n", k)
 				}
 			}
-            val.CreatedOn = result.Record().Time()
+			val.CreatedOn = result.Record().Time()
 			resultPoints[result.Record().Time()] = val
 
 		}
