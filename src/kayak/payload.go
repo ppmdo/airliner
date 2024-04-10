@@ -13,6 +13,7 @@ func CreatePayloads(
 	initialDate time.Time,
 	tripLength int,
 	daysToLookup int,
+	direct bool,
 	ch chan *md.Payload,
 	wg *sync.WaitGroup,
 ) {
@@ -34,6 +35,7 @@ func CreatePayloads(
 			DepartureDate: initialDate2,
 			ReturnDate:    returnDate,
 			Id:            i,
+			Direct:        direct,
 		}
 		i++
 	}

@@ -25,6 +25,7 @@ func main() {
 	var duration = flag.Int("duration", -1, "journey duration")
 	var concurrency = flag.Int("concurrency", 2, "max num. of concurrent jobs")
 	var startdate = flag.String("start-date", "", "initial day to lookup")
+	var direct = flag.Bool("direct", true, "set to false to look for non-direct flights too")
 
 	var client = db.InitDB("test_influxdb.env")
 
@@ -75,7 +76,7 @@ func main() {
 
 	wg.Add(2)
 	go ky.CreatePayloads(
-		fromCity, toCity, initialDate, tripDuration, datesToLookAhead, inChan, &wg,
+		fromCity, toCity, initialDate, tripDuration, datesToLookAhead, *direct, inChan, &wg,
 	)
 
 	go readAndSaveOffers(
