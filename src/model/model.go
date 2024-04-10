@@ -29,6 +29,7 @@ type Payload struct {
 	ToCity        string
 	DepartureDate time.Time
 	ReturnDate    time.Time
+	Direct        bool
 	Id            int
 }
 

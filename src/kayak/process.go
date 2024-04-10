@@ -19,6 +19,9 @@ import (
 	md "airliner/model"
 )
 
+const TIMEOUT_MINUTES = time.Minute * 10
+const MAX_RETRIES = 5
+
 func takeScreenshot(ctx *context.Context, buff *[]byte) {
 	if err := chromedp.Run(*ctx,
 		chromedp.CaptureScreenshot(buff),
@@ -76,7 +79,7 @@ func writeDebugData(prefix string, screenshot []byte, html string) {
 }
 
 func isReady(ctx *context.Context) (bool, error) {
-	retries := 5
+	retries := MAX_RETRIES
 	sleepMultiplier := 2
 	var err error
 	var adviceText *string
@@ -98,10 +101,11 @@ func isReady(ctx *context.Context) (bool, error) {
 	}
 
 	if adviceText == nil {
+		log.Printf("CRITICAL :: Failed to find advice text. Cannot continue.")
 		return false, errors.New("advice text not found")
 	}
 
-	retries = 5
+	retries = MAX_RETRIES
 	sleepMultiplier = 2
 	for retries > 0 {
 		nodeCount := countResultList(ctx)
@@ -177,10 +181,14 @@ func GetOfferForPayload(payload *md.Payload) (*md.Offer, error) {
 	defer cancel()
 
 	// create a timeout
-	ctx, cancel = context.WithTimeout(ctx, time.Minute*5)
+	ctx, cancel = context.WithTimeout(ctx, TIMEOUT_MINUTES)
 	defer cancel()
 
-	url := "https://www.kayak.com/flights/" + payload.FromCity + "-" + payload.ToCity + "/" + payload.DateString() + "?sort=price_a&fs=stops=~0"
+	url := "https://www.kayak.com/flights/" + payload.FromCity + "-" + payload.ToCity + "/" + payload.DateString() + "?sort=price_a"
+
+	if payload.Direct {
+		url += "&fs=stops=~0"
+	}
 
 	log.Printf("Fetching: %s\n", url)
 

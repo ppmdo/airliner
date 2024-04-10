@@ -13,7 +13,7 @@ import (
 )
 
 func getAdviceText(ctx *context.Context) (*string, error) {
-	adviceSelector := "[class$=\"-advice\"]"
+	adviceSelector := "[class$=\"-prediction-container\"]"
 	var adviceText = ""
 
 	if err := chromedp.Run(*ctx,
