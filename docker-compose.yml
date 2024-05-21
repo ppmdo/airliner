@@ -4,6 +4,8 @@ services:
         volumes:
             - $HOME/docker/influxdb/data:/var/lib/influxdb
         environment:
+            TELEGRAM_API_KEY: ${TELEGRAM_API_KEY}
+            TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
             DOCKER_INFLUXDB_INIT_MODE: setup
             DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME}
             DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD}
