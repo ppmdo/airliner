@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/joho/godotenv"
 	"log"
 	"os"
 	"sync"
@@ -29,6 +30,7 @@ func main() {
 
 	var client = db.InitDB("test_influxdb.env")
 
+	godotenv.Load()
 	flag.Parse()
 
 	if *fromcity == "" {
